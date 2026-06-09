@@ -1,0 +1,15 @@
+fastapi
+uvicorn[standard]
+python-multipart
+sqlalchemy
+psycopg2-binary
+pillow
+torch
+torchvision
+transformers
+accelerate
+huggingface_hub
+reportlab
+nibabel
+pydicom
+pydantic
