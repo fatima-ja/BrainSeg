@@ -8,7 +8,7 @@ BrainSeg AI is a full-stack medical imaging application that combines a 3D U-Net
 ## ✨ Features
 
 - **3D U-Net Segmentation** — Trained on BraTS dataset, detects 4 tumor classes: Necrotic Core, Edema, Enhancing Tumor, and Background
-- **MedGemma AI Analysis** — Google's medical vision-language model provides clinical descriptions of MRI findings
+- **MedGemma AI Analysis** — Google's medical vision-language model provides clinical descriptions of MRI findings (https://huggingface.co/google/medgemma-4b-it )
 - **Multi-format Support** — Accepts `.nii`, `.nii.gz`, `.dcm`, `.jpg`, `.png`, `.bmp`, `.tiff`
 - **4-Modality Input** — Upload T1, T1ce, T2, and FLAIR simultaneously for best accuracy
 - **Patient Management** — Create and manage patient records with scan history
@@ -52,14 +52,9 @@ brainseg-ai/
 - Node.js 20+
 - Git
 
-### 1. Clone the Repository
 
-```bash
-git clone https://github.com/yourusername/brainseg-ai.git
-cd brainseg-ai
-```
 
-### 2. Backend Setup
+### 1. Backend Setup
 
 ```bash
 cd brainseg-backend
@@ -72,7 +67,7 @@ cp .env.example .env
 ```
 
 
-### 3. Start the Backend
+### 2. Start the Backend
 
 ```bash
 uvicorn main:app --reload --port 8000
@@ -80,7 +75,7 @@ uvicorn main:app --reload --port 8000
 
 API docs: **http://localhost:8000/docs**
 
-### 4. Frontend Setup
+### 3. Frontend Setup
 
 ```bash
 cd brainseg-frontend
