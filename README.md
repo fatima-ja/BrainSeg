@@ -7,7 +7,7 @@ BrainSeg AI is a full-stack medical imaging application that combines a 3D U-Net
 
 ## ✨ Features
 
-- **3D U-Net Segmentation** — Trained on BraTS dataset, detects 4 tumor classes: Necrotic Core, Edema, Enhancing Tumor, and Background
+- **3D U-Net Segmentation** — Trained on BraTS dataset, detects 4 tumor classes: Necrotic Core, Edema, Enhancing Tumor, and Background(https://www.kaggle.com/datasets/awsaf49/brats20-dataset-training-validation )
 - **MedGemma AI Analysis** — Google's medical vision-language model provides clinical descriptions of MRI findings (https://huggingface.co/google/medgemma-4b-it )
 - **Multi-format Support** — Accepts `.nii`, `.nii.gz`, `.dcm`, `.jpg`, `.png`, `.bmp`, `.tiff`
 - **4-Modality Input** — Upload T1, T1ce, T2, and FLAIR simultaneously for best accuracy
