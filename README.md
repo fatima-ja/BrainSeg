@@ -1,5 +1,4 @@
 # 🧠 BrainSeg AI
-
 **Automated Brain Tumor Segmentation & Analysis System**
 
 BrainSeg AI is a full-stack medical imaging application that combines a 3D U-Net deep learning model for brain tumor segmentation with MedGemma AI for clinical analysis. It supports multi-modal MRI input (T1, T1ce, T2, FLAIR) and generates detailed PDF reports for clinical use.
@@ -14,15 +13,9 @@ BrainSeg AI is a full-stack medical imaging application that combines a 3D U-Net
 - **4-Modality Input** — Upload T1, T1ce, T2, and FLAIR simultaneously for best accuracy
 - **Patient Management** — Create and manage patient records with scan history
 - **PDF Reports** — Auto-generated clinical reports with images, segmentation results, and AI analysis
+- **NIfTI Output with Mask** — Saves the original MRI alongside a label map NIfTI file with the segmentation mask, ready for 3D visualization in 3D Slicer and ITK-SNAP
+- **3D Tumor Visualization** — Label map files use corrected spatial affine matrices for accurate alignment with the original MRI in 3D viewers
 - **Modern UI** — Dark-themed React frontend with real-time progress tracking
-
----
-
-## 🖼️ Screenshots
-
-| Dashboard | Analysis | Segmentation Results |
-|-----------|----------|----------------------|
-| Patient overview & recent scans | Upload MRI + run analysis | 4-modality overlays with tumor classes |
 
 ---
 
@@ -30,22 +23,22 @@ BrainSeg AI is a full-stack medical imaging application that combines a 3D U-Net
 
 ```
 brainseg-ai/
-├── brainseg-backend/          # FastAPI backend
-│   ├── main.py                # API endpoints
+├── brainseg-backend/
+│   ├── main.py
 │   ├── models/
-│   │   └── database.py        # SQLAlchemy models (Patient, Scan)
+│   │   └── database.py
 │   ├── services/
-│   │   ├── segmentation.py    # 3D U-Net inference (TensorFlow)
-│   │   ├── medgemma.py        # MedGemma AI analysis
-│   │   └── pdf_service.py     # PDF report generation
+│   │   ├── segmentation.py
+│   │   ├── medgemma.py
+│   │   └── pdf_service.py
 │   └── requirements.txt
-└── brainseg-frontend/         # React frontend
+└── brainseg-frontend/
     └── src/
         ├── pages/
-        │   ├── Dashboard.jsx  # Stats overview
-        │   ├── Analysis.jsx   # MRI upload & results
-        │   ├── Patients.jsx   # Patient management
-        │   └── History.jsx    # Scan history
+        │   ├── Dashboard.jsx
+        │   ├── Analysis.jsx
+        │   ├── Patients.jsx
+        │   └── History.jsx
         └── App.jsx
 ```
 
@@ -70,39 +63,24 @@ cd brainseg-ai
 
 ```bash
 cd brainseg-backend
-
-# Create virtual environment
 python -m venv .venv
 .venv\Scripts\activate        # Windows
 # source .venv/bin/activate   # Linux/Mac
-
-# Install dependencies
 pip install -r requirements.txt
-
-# Configure environment
 cp .env.example .env
-# Edit .env and add your HF_TOKEN and model path
+# Edit .env and fill in HF_TOKEN and model path
 ```
 
-### 3. Add Your Model
 
-Place your trained model file in the backend folder and update `.env`:
-
-```env
-HF_TOKEN=hf_your_huggingface_token_here
-UNET_WEIGHTS=path/to/brainseg_final.keras
-DATABASE_URL=sqlite:///./brainseg.db
-```
-
-### 4. Start the Backend
+### 3. Start the Backend
 
 ```bash
 uvicorn main:app --reload --port 8000
 ```
 
-API docs available at **http://localhost:8000/docs**
+API docs: **http://localhost:8000/docs**
 
-### 5. Frontend Setup
+### 4. Frontend Setup
 
 ```bash
 cd brainseg-frontend
@@ -122,19 +100,51 @@ Open **http://localhost:5173**
 | Framework | TensorFlow / Keras |
 | Input Shape | `(1, 128, 128, 128, 4)` |
 | Output Shape | `(1, 128, 128, 128, 4)` |
-| Input Modalities | FLAIR, T1, T1ce, T2 |
+| Input Modalities | T1, T1ce, T2, FLAIR |
 | Output Classes | Background, Necrotic Core, Edema, Enhancing Tumor |
-| Training Dataset | BraTS (Brain Tumor Segmentation) |
-| Normalization | MinMaxScaler per volume |
+| Training Dataset | BraTS 2020 (369 scans) |
+| Normalization | Z-score on non-zero voxels |
+| Crop | Center crop to 128 × 128 × 128 |
 
-### Tumor Classes & Colors
+### Tumor Classes
 
-| Class | Color | Description |
-|-------|-------|-------------|
-| Background | ⬛ Black | Normal brain tissue |
-| Necrotic Core | 🔴 Red | Dead tumor cells |
-| Edema | 🩵 Cyan | Swelling around tumor |
-| Enhancing Tumor | 🟡 Yellow | Active tumor region |
+| Class | Label | Color |
+|-------|-------|-------|
+| Background | 0 | ⬛ Black |
+| Necrotic Core | 1 | 🔴 Red |
+| Edema | 2 | 🟢 Green |
+| Enhancing Tumor | 3 | 🔵 Blue |
+
+---
+
+## 📁 NIfTI Output with Segmentation Mask
+
+After each analysis, BrainSeg AI automatically saves files in a per-patient folder:
+
+```
+patient_images/
+└── patient_1_name/
+    └── scan_<uuid>/
+        ├── t1.nii.gz                    ← original T1
+        ├── t1ce.nii.gz                  ← original T1ce
+        ├── t2.nii.gz                    ← original T2
+        ├── flair.nii.gz                 ← original FLAIR
+        ├── t1ce_original_<uuid>.nii.gz  ← full-resolution T1ce copy
+        ├── label_map_<uuid>.nii.gz      ← segmentation mask (spatially aligned)
+        └── HOW_TO_VIEW_3D.txt           ← step-by-step 3D Slicer instructions
+```
+
+The label map uses a **corrected affine matrix** that accounts for the center-crop preprocessing, ensuring the mask aligns perfectly with the original full-resolution MRI.
+
+### Viewing in 3D Slicer
+
+1. Download **3D Slicer**: https://www.slicer.org
+2. **File → Add Data** → load both:
+   - `t1ce_original_*.nii.gz` — MRI scan
+   - `label_map_*.nii.gz` — tumor labels
+3. For the label map: check **Show Options** → set Description = `LabelMap`
+4. Adjust overlay opacity in the Volumes module
+5. **Segment Editor → Show 3D** for full 3D tumor view
 
 ---
 
@@ -154,41 +164,7 @@ Open **http://localhost:5173**
 
 ---
 
-## 🌐 Deployment (Render)
 
-This project is configured for deployment on [Render](https://render.com) using the included `render.yaml`.
-
-### Steps
-
-1. Push to GitHub
-2. Go to [render.com](https://render.com) → **New** → **Blueprint**
-3. Connect your GitHub repo
-4. Set environment variables in the Render dashboard:
-
-| Variable | Value |
-|----------|-------|
-| `HF_TOKEN` | Your Hugging Face token |
-| `FRONTEND_URL` | Your deployed frontend URL |
-| `UNET_WEIGHTS` | Path to your model file |
-
-> **Note:** The 3D U-Net model requires significant RAM. Use at least the **Standard** plan on Render, or consider running inference on Google Colab with GPU for faster results.
-
----
-
-## 🧪 Usage
-
-### Single File Analysis
-
-1. Go to **Patients** → create a patient → note the ID
-2. Go to **New Scan** → select **Single File** mode
-3. Enter the patient ID → upload any MRI file
-4. Click **Run Analysis** → view results and download PDF
-
-### 4-Modality Analysis (Best Accuracy)
-
-1. Go to **New Scan** → select **4 Modalities** mode
-2. Upload T1, T1ce, T2, and FLAIR NIfTI files
-3. Click **Run Analysis** → view all 4 overlays with tumor segmentation
 
 ---
 
@@ -203,6 +179,7 @@ psycopg2-binary
 pillow
 tensorflow
 scikit-learn
+scipy
 huggingface_hub
 transformers
 accelerate
@@ -223,7 +200,7 @@ BrainSeg AI is intended for **research and educational purposes only**. It is no
 
 ## 👩‍💻 Author
 
-**Fatima** — Software Engineering Student, Ajloun National University  
+**Fatima Al-Jawarneh** — Software Engineering Student, Ajloun National University
 AI/ML Engineering · Medical Imaging · Deep Learning
 
 ---
