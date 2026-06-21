@@ -2,17 +2,16 @@ import os
 import numpy as np
 from PIL import Image
 
-MODEL_PATH = os.getenv("UNET_WEIGHTS", r"D:\New folder\brainseg-backend\brainseg_final.keras")
+MODEL_PATH = os.getenv("UNET_WEIGHTS", r"the path of the model")
 
-# ── Class definitions ─────────────────────────────────────────────────────────
-# Channel order from notebook: ['t1', 't1ce', 't2', 'flair']
-# Label colors from notebook LABEL_COLORS (but we use our own display colors)
+
 CLASS_COLORS = {
-    0: [0,   0,   0],    # Background
+    0: [0,   0,   0],
     1: [255, 0,   0],    # NCR/NET — red
-    2: [0,   255, 0],    # Edema   — green  (notebook uses green not cyan)
-    3: [0,   0,   255],  # ET      — blue   (notebook uses blue not yellow)
+    2: [0,   255, 0],    # Edema   — green
+    3: [0,   0,   255],  # ET      — blue
 }
+
 CLASS_NAMES = {
     0: "Background",
     1: "Necrotic Core",
@@ -36,10 +35,9 @@ def get_model():
     return model
 
 
-# ─── Preprocessing — matches notebook EXACTLY ────────────────────────────────
+# ─── Preprocessing ───────────────────────────────────────────────────────────
 
 def normalize(vol: np.ndarray) -> np.ndarray:
-    """Z-score normalization on non-zero voxels only — matches training."""
     mask = vol > 0
     if mask.sum() == 0:
         return vol
@@ -50,7 +48,6 @@ def normalize(vol: np.ndarray) -> np.ndarray:
 
 
 def center_crop(vol: np.ndarray, target=(128, 128, 128)) -> np.ndarray:
-    """Center-crop or pad to target shape — matches training exactly."""
     result = np.zeros(target, dtype=vol.dtype)
     src, dst = [], []
     for i in range(3):
@@ -78,8 +75,17 @@ def load_nifti_volume(image_path: str) -> np.ndarray:
     return data.astype(np.float32)
 
 
+def load_nifti_raw(image_path: str) -> tuple:
+    """Load raw NIfTI data and affine without preprocessing — for saving full-size label map."""
+    import nibabel as nib
+    nii  = nib.load(image_path)
+    data = nii.get_fdata(dtype=np.float32)
+    if data.ndim == 4:
+        data = data[:, :, :, 0]
+    return data.shape, nii.affine, nii.header
+
+
 def load_image_as_array(image_path: str) -> np.ndarray:
-    """Load any 2D/3D format → normalized float32 [H, W]."""
     ext = image_path.lower()
     if ext.endswith(".nii") or ext.endswith(".nii.gz"):
         vol    = load_nifti_volume(image_path)
@@ -105,20 +111,17 @@ def load_image_as_array(image_path: str) -> np.ndarray:
 
 
 def array_to_pil(arr: np.ndarray) -> Image.Image:
-    # Clip to valid range after z-score
     arr_clipped = np.clip(arr, arr.min(), arr.max())
-    arr_norm = (arr_clipped - arr_clipped.min()) / (arr_clipped.max() - arr_clipped.min() + 1e-8)
+    arr_norm    = (arr_clipped - arr_clipped.min()) / (arr_clipped.max() - arr_clipped.min() + 1e-8)
     return Image.fromarray((arr_norm * 255).astype(np.uint8), mode="L")
 
 
-# ─── Helpers ──────────────────────────────────────────────────────────────────
+# ─── Helpers ─────────────────────────────────────────────────────────────────
 
 def _build_overlay(base_slice: np.ndarray, class_map: np.ndarray) -> np.ndarray:
-    """Build colour overlay. base_slice can be z-score normalized."""
     h, w = class_map.shape
-    # Normalize base_slice to [0,255] for display
-    b = base_slice.copy().astype(np.float32)
-    b = (b - b.min()) / (b.max() - b.min() + 1e-8)
+    b    = base_slice.copy().astype(np.float32)
+    b    = (b - b.min()) / (b.max() - b.min() + 1e-8)
     base_pil = Image.fromarray((b * 255).astype(np.uint8)).convert("RGB")
     base_pil = base_pil.resize((w, h), Image.BILINEAR)
     base_arr = np.array(base_pil, dtype=np.float32)
@@ -149,10 +152,61 @@ def _best_slice(seg_vol: np.ndarray) -> int:
     return int(np.argmax(scores)) if max(scores) > 0 else seg_vol.shape[2] // 2
 
 
+def _upsample_to_original(seg_128: np.ndarray, orig_shape: tuple) -> np.ndarray:
+    """
+    Upsample (128,128,128) label map back to original volume size
+    using nearest-neighbor interpolation to keep integer labels intact.
+    """
+    from scipy.ndimage import zoom
+    zoom_factors = (
+        orig_shape[0] / 128,
+        orig_shape[1] / 128,
+        orig_shape[2] / 128,
+    )
+    seg_full = zoom(seg_128.astype(np.float32), zoom_factors, order=0)
+    return seg_full.astype(np.uint8)
+
+
+def _save_label_map_nifti(seg_128, ref_path, output_path):
+    import nibabel as nib
+    from scipy.ndimage import zoom
+
+    orig_nii    = nib.load(ref_path)
+    orig_data   = orig_nii.get_fdata(dtype=np.float32)
+    orig_shape  = orig_data.shape          # (240, 240, 155)
+    orig_affine = orig_nii.affine.copy()
+
+    # Compute crop offsets used in center_crop
+    offsets = []
+    for s, t in zip(orig_shape, [128, 128, 128]):
+        offsets.append((s - t) // 2 if s >= t else 0)
+    x_off, y_off, z_off = offsets
+    print(f"Crop offsets: {x_off}, {y_off}, {z_off}")
+
+    # Place seg_128 back into a full-size volume at the correct location
+    full_label = np.zeros(orig_shape, dtype=np.uint8)
+    x2 = min(x_off + 128, orig_shape[0])
+    y2 = min(y_off + 128, orig_shape[1])
+    z2 = min(z_off + 128, orig_shape[2])
+    full_label[x_off:x2, y_off:y2, z_off:z2] = seg_128[
+        :x2-x_off, :y2-y_off, :z2-z_off
+    ]
+    print(f"Full label shape: {full_label.shape}, non-zero: {(full_label>0).sum()}")
+
+    # Save with original affine — no modification needed
+    label_img = nib.Nifti1Image(full_label.astype(np.uint8), orig_affine)
+    label_img.header['scl_slope'] = 1
+    label_img.header['scl_inter'] = 0
+    label_img.header.set_data_dtype(np.uint8)
+    nib.save(label_img, output_path)
+    print(f"Label map saved: {output_path}")
+    return full_label
+
+
 # ─── Main Functions ───────────────────────────────────────────────────────────
 
 def run_segmentation(image_path: str, output_path: str) -> dict:
-    """Single file segmentation — duplicates to 4 channels."""
+    """Single file segmentation."""
     mdl = get_model()
     ext = image_path.lower()
 
@@ -168,14 +222,18 @@ def run_segmentation(image_path: str, output_path: str) -> dict:
         else:
             seg_vol = np.zeros((128, 128, 128), dtype=np.int32)
 
+        # Save full-size label map NIfTI (no crop)
+        label_out = os.path.splitext(output_path)[0] + "_label_map.nii.gz"
+        _save_label_map_nifti(seg_vol, image_path, label_out)
+
         best      = _best_slice(seg_vol)
         class_map = seg_vol[:, :, best]
         base_s    = vol[:, :, best]
 
     else:
         slice_2d = load_image_as_array(image_path)
-        pil      = Image.fromarray((np.clip(slice_2d,0,1)*255).astype(np.uint8))
-        resized  = np.array(pil.resize((128,128), Image.BILINEAR), dtype=np.float32) / 255.0
+        pil      = Image.fromarray((np.clip(slice_2d, 0, 1) * 255).astype(np.uint8))
+        resized  = np.array(pil.resize((128, 128), Image.BILINEAR), dtype=np.float32) / 255.0
         arr_4ch  = np.stack([resized]*4, axis=-1)
         fake_vol = np.stack([arr_4ch]*128, axis=2)
         tensor   = fake_vol[np.newaxis, ...]
@@ -202,16 +260,16 @@ def run_segmentation(image_path: str, output_path: str) -> dict:
 def run_segmentation_4ch(paths: dict, output_path: str) -> dict:
     """
     4-modality segmentation — matches training notebook EXACTLY.
-    Notebook MODALITIES order: ['t1', 't1ce', 't2', 'flair']
+    Channel order: ['t1', 't1ce', 't2', 'flair']
     Normalization: Z-score on non-zero voxels
     Crop: center_crop to (128,128,128)
+    Label map saved at FULL original size (no crop).
     """
     mdl = get_model()
 
-    # Load in exact training order: t1, t1ce, t2, flair
     channels = []
     for key in ['t1', 't1ce', 't2', 'flair']:
-        vol = load_nifti_volume(paths[key])   # (128,128,128)
+        vol = load_nifti_volume(paths[key])
         channels.append(vol)
         print(f"Loaded {key}: mean={vol.mean():.4f} std={vol.std():.4f}")
 
@@ -225,32 +283,36 @@ def run_segmentation_4ch(paths: dict, output_path: str) -> dict:
     else:
         seg_vol = np.zeros((128, 128, 128), dtype=np.int32)
 
+    # ── Save full-size label map NIfTI (no crop, upsampled to original size) ──
+    label_out = os.path.splitext(output_path)[0] + "_label_map.nii.gz"
+    _save_label_map_nifti(seg_vol, paths['t1ce'], label_out)
+
     best      = _best_slice(seg_vol)
     class_map = seg_vol[:, :, best]
     print(f"Best display slice: {best}")
     stats = _compute_stats(class_map)
 
-    # Save overlay for all 4 modalities
+    # Save PNG overlay for all 4 modalities
     modality_names = ['t1', 't1ce', 't2', 'flair']
     overlay_paths  = []
     base_out       = os.path.splitext(output_path)[0]
 
-    for i, (key, vol) in enumerate(zip(modality_names, channels)):
+    for key, vol in zip(modality_names, channels):
         base_s   = vol[:, :, best]
         blended  = _build_overlay(base_s, class_map)
         mod_path = f"{base_out}_{key}.png"
         Image.fromarray(blended).save(mod_path)
         overlay_paths.append(mod_path.replace("\\", "/"))
 
-    # t1ce is index 1 in ['t1','t1ce','t2','flair']
     return {
-        "segmentation_path":  overlay_paths[1],
+        "segmentation_path":  overlay_paths[1],   # t1ce as primary
         "segmentation_paths": {
             "t1":    overlay_paths[0],
             "t1ce":  overlay_paths[1],
             "t2":    overlay_paths[2],
             "flair": overlay_paths[3],
         },
-        "input_format": ".nii",
+        "label_map_path": label_out.replace("\\", "/"),
+        "input_format":   ".nii",
         **stats,
     }
